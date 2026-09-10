@@ -112,6 +112,48 @@ function setUiStatus(buttonText, instructionText, { disabled = true } = {}) {
   instruction.textContent = instructionText;
 }
 
+/**
+ * Shows a dismissible on-screen diagnostic panel when WebXR fails.
+ * Displays the raw error name/message plus environment details so the
+ * actual rejection reason is always visible rather than a generic alert.
+ * NOTE: Remove or gate behind a debug flag before final public release.
+ */
+function showARDiagnostic(title, details) {
+  // Remove any previous panel
+  document.getElementById('ar-diagnostic')?.remove();
+
+  const panel = document.createElement('div');
+  panel.id = 'ar-diagnostic';
+  panel.style.cssText = [
+    'position:fixed', 'inset:0',
+    'background:rgba(8,10,20,0.96)', 'color:#f1f5f9',
+    'font-family:ui-monospace,monospace', 'font-size:13px',
+    'padding:28px 24px', 'overflow-y:auto',
+    'z-index:9999', 'box-sizing:border-box',
+  ].join(';');
+
+  panel.innerHTML = `
+    <div style="max-width:640px;margin:0 auto">
+      <div style="color:#f87171;font-size:17px;font-weight:700;margin-bottom:18px">&#9888; ${title}</div>
+      <pre style="white-space:pre-wrap;word-break:break-word;line-height:1.7;margin:0 0 24px;background:rgba(255,255,255,.06);padding:16px;border-radius:8px">${details}</pre>
+      <button id="ar-diag-close" style="padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit">Dismiss &amp; Try Again</button>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+
+  document.getElementById('ar-diag-close')?.addEventListener('click', () => {
+    panel.remove();
+    // Restore the landing overlay so the user can retry
+    document.getElementById('ui-overlay')?.classList.remove('hidden');
+    setUiStatus(
+      'START AR',
+      'Tap START AR, then point at a flat surface and tap to place the Porsche.',
+      { disabled: false }
+    );
+  });
+}
+
 function loadPorscheModel() {
   if (modelLoadPromise) return modelLoadPromise;
 
@@ -198,12 +240,25 @@ async function setupUI() {
   const startBtn = document.getElementById('start-btn');
   startBtn.disabled = true;
 
+  // 0. Secure context guard — WebXR requires HTTPS. Catches misconfigured dev/staging environments.
+  if (!window.isSecureContext) {
+    setUiStatus(
+      'AR UNAVAILABLE',
+      'WebXR requires a secure connection (HTTPS). Please access this page over HTTPS.',
+      { disabled: true }
+    );
+    startDesktopModelPreview();
+    return;
+  }
+
   // 1. Check WebXR (Android)
   let webxrSupported = false;
   if ('xr' in navigator) {
     try {
       webxrSupported = await navigator.xr.isSessionSupported('immersive-ar');
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[WebXR] isSessionSupported threw:', e);
+    }
   }
 
   if (webxrSupported) {
@@ -379,27 +434,85 @@ async function startWebXRSession() {
   const overlay = document.getElementById('ui-overlay');
 
   try {
+    // 'local' declares the base reference space ARCore requires on Android.
+    // Without it, requestSession() is rejected on many devices even if
+    // immersive-ar isSessionSupported() returned true.
+    // 'hit-test' enables surface detection for the placement reticle.
+    // Both must be in requiredFeatures — this call must stay inside the
+    // user-click handler to preserve the transient activation requirement.
     const session = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['hit-test'],
+      requiredFeatures: ['local', 'hit-test'],
     });
 
     session.addEventListener('end', onSessionEnded);
 
-    // Pass session to Three.js
+    // Hand the session to Three.js — sets up the XR render loop internally
     await renderer.xr.setSession(session);
 
-    // UI changes for AR
+    // UI changes for AR mode
     isStarted = true;
     overlay.classList.add('hidden');
 
-    // Make background transparent for camera feed
+    // Transparent background exposes the camera feed
     scene.background = null;
 
-    // Hide the Porsche until the user taps to place it
+    // Porsche hidden until the user taps a surface to place it
     object.visible = false;
+
   } catch (err) {
-    console.error('Failed to start AR session:', err);
-    alert('Failed to start AR session. Please ensure camera permissions are granted.');
+    // --- Detailed diagnostic — surfaces the real rejection reason. ---
+    // The generic 'camera permissions' message previously hid SecurityError
+    // (Permissions-Policy) and NotSupportedError (missing 'local' feature)
+    // which are the two most common failures on Android Chrome + ARCore.
+
+    // Probe additional environment state for the diagnostic
+    let arSupported = 'unknown';
+    try {
+      arSupported = String(
+        await navigator.xr?.isSessionSupported?.('immersive-ar') ?? 'navigator.xr missing'
+      );
+    } catch (probeErr) {
+      arSupported = `isSessionSupported threw: ${probeErr.message}`;
+    }
+
+    const diag = [
+      `error name    : ${err.name    ?? '(none)'}`,
+      `error message : ${err.message ?? '(none)'}`,
+      ``,
+      `secure context: ${window.isSecureContext}`,
+      `protocol      : ${location.protocol}`,
+      `hostname      : ${location.hostname}`,
+      `navigator.xr  : ${'xr' in navigator}`,
+      `ar supported  : ${arSupported}`,
+      ``,
+      `user agent    : ${navigator.userAgent}`,
+    ].join('\n');
+
+    // Map known WebXR error types to actionable descriptions
+    const causes = {
+      SecurityError:
+        'Permissions-Policy is blocking xr-spatial-tracking, or the page is not served over HTTPS. ' +
+        'Check that the server sends: Permissions-Policy: xr-spatial-tracking=*',
+      NotAllowedError:
+        'Camera or AR permission was denied by the user or OS. ' +
+        'Check site permissions in Chrome Settings and ensure camera access is allowed.',
+      NotSupportedError:
+        "This device or browser does not support immersive-ar. " +
+        "Ensure ARCore is installed and updated (Android 7+ required).",
+      InvalidStateError:
+        'An AR session is already active, or the XR subsystem is in an invalid state. Try reloading the page.',
+      AbortError:
+        'The AR session request was aborted. The browser may have interrupted it due to focus loss or another active session.',
+    };
+
+    const cause = causes[err.name] ?? `Unrecognised error (${err.name ?? 'no name'}). See console for stack trace.`;
+    const title = `WebXR failed: ${err.name ?? 'Error'}`;
+
+    console.error('[WebXR] AR session failed\n', diag, '\nCause hint:', cause, '\nFull error:', err);
+    showARDiagnostic(title, `${cause}\n\n${diag}`);
+
+    // Restore landing overlay so the user isn't stuck on a blank screen
+    overlay.classList.remove('hidden');
   }
 }
 
