@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="Experience the iconic Porsche 911 in augmented reality — place it in your world and explore it from every angle." />
+  <title>Porsche 911 · AR Experience</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- Ambient background layers (CSS-only, decorative) -->
+  <div class="bg-glow" aria-hidden="true"></div>
+  <div class="bg-grid"  aria-hidden="true"></div>
+
+  <!-- 3D Canvas Container — must stay as #app for main.js -->
+  <div id="app"></div>
+
+  <!-- Landing UI Overlay — must stay as #ui-overlay.overlay for main.js -->
+  <div id="ui-overlay" class="overlay">
+
+    <!-- Scanning ring decoration -->
+    <div class="scan-rings" aria-hidden="true">
+      <div class="ring ring-1"></div>
+      <div class="ring ring-2"></div>
+      <div class="ring ring-3"></div>
+    </div>
+
+    <!-- Main content card -->
+    <div class="card">
+
+      <!-- Eyebrow label -->
+      <div class="eyebrow animate-in" style="--delay:0s">
+        <span class="eyebrow-dot"></span>
+        CLASSIC&nbsp;911&nbsp;&nbsp;·&nbsp;&nbsp;AR&nbsp;EXPERIENCE
+      </div>
+
+      <!-- Headline -->
+      <h1 class="headline animate-in" style="--delay:.12s">
+        Experience<br>
+        <em>the&nbsp;911</em><br>
+        in your space.
+      </h1>
+
+      <!-- Sub-copy -->
+      <p class="instruction animate-in" style="--delay:.22s">
+        Place a legendary classic in your surroundings<br class="br-desktop">
+        and explore it from every angle.
+      </p>
+
+      <!-- CTA -->
+      <div class="btn-wrap animate-in" style="--delay:.34s">
+        <button id="start-btn" class="primary-btn">
+          <!-- AR scan icon -->
+          <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M3 7V5a2 2 0 0 1 2-2h2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M17 3h2a2 2 0 0 1 2 2v2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M21 17v2a2 2 0 0 1-2 2h-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M7 21H5a2 2 0 0 1-2-2v-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
+            <circle cx="12" cy="12" r="6" stroke="currentColor" stroke-width="1" stroke-dasharray="2 3" opacity=".5"/>
+          </svg>
+          <span class="btn-label">START AR</span>
+        </button>
+        <!-- Device hint — JS updates .instruction; this is static decoration -->
+        <p class="device-hint">Works on compatible iPhone &amp; Android devices</p>
+      </div>
+
+      <!-- Technical badge -->
+      <div class="tech-badge animate-in" style="--delay:.48s" aria-hidden="true">
+        <span>WEB AR</span>
+        <span class="badge-sep">·</span>
+        <span>REAL‑WORLD SCALE</span>
+        <span class="badge-sep">·</span>
+        <span>INTERACTIVE</span>
+      </div>
+
+    </div><!-- /card -->
+
+  </div><!-- /ui-overlay -->
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>

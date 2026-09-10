@@ -1,0 +1,17 @@
+# Generated build output
+dist/
+
+# Dependencies
+node_modules/
+
+# Large backup/source assets — keep locally, do NOT deploy
+public/assets/porsche_911_original.glb
+public/assets/model1.usdz
+public/assets/model_backup.usdz
+public/assets/model_scaled.usdz
+public/assets/model.usdc
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+*.log

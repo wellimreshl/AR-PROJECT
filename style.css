@@ -1,0 +1,469 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   PORSCHE 911 · AR EXPERIENCE — PREMIUM LANDING STYLES
+   Fonts: DM Serif Display (display/headline) + DM Sans (UI)
+───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Palette */
+  --c-bg:          #090d14;
+  --c-bg-mid:      #0b1120;
+  --c-surface:     rgba(14, 20, 36, 0.72);
+  --c-border:      rgba(255, 255, 255, 0.07);
+  --c-border-hi:   rgba(255, 255, 255, 0.13);
+  --c-text-primary:  #f0f2f7;
+  --c-text-second:   rgba(190, 198, 218, 0.78);
+  --c-text-muted:    rgba(150, 162, 185, 0.55);
+  --c-accent:      #c8a96e;   /* warm Porsche gold */
+  --c-accent-dim:  rgba(200, 169, 110, 0.18);
+  --c-accent-glow: rgba(200, 169, 110, 0.28);
+  --c-blue-glow:   rgba(96, 130, 200, 0.14);
+
+  /* Type */
+  --f-serif:  'DM Serif Display', 'Georgia', 'Times New Roman', serif;
+  --f-sans:   'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* Spacing */
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top,    0px);
+}
+
+/* ── Reset ─────────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;          /* critical — keeps AR canvas in place */
+  background-color: var(--c-bg);
+  color: var(--c-text-primary);
+  font-family: var(--f-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── 3D Canvas host — untouched by styling ────────────────────────────────── */
+#app {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
+/* ── Ambient background layers ────────────────────────────────────────────── */
+
+/* Warm deep-space radial glow */
+.bg-glow {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 30%,  rgba(80, 60, 30, 0.22) 0%, transparent 65%),
+    radial-gradient(ellipse 60% 80% at 80% 80%,  rgba(40, 55, 100, 0.15) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 50% at 20% 70%,  rgba(30, 45,  90, 0.10) 0%, transparent 55%);
+  animation: glow-drift 18s ease-in-out infinite alternate;
+}
+
+@keyframes glow-drift {
+  0%   { opacity: 1;    transform: scale(1)     translateY(0);   }
+  50%  { opacity: 0.85; transform: scale(1.04)  translateY(-8px); }
+  100% { opacity: 1;    transform: scale(0.97)  translateY(4px); }
+}
+
+/* Subtle architectural grid */
+.bg-grid {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image:
+    linear-gradient(rgba(180, 195, 230, 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(180, 195, 230, 0.6) 1px, transparent 1px);
+  background-size: 60px 60px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, black 0%, transparent 100%);
+  mask-image:         radial-gradient(ellipse 70% 70% at 50% 50%, black 0%, transparent 100%);
+}
+
+/* ── Full-screen overlay (must keep .overlay + #ui-overlay for main.js) ───── */
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: calc(20px + var(--safe-t)) 20px calc(24px + var(--safe-b));
+  transition: opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+              visibility 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ── Scan ring decoration ─────────────────────────────────────────────────── */
+.scan-rings {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(200, 169, 110, 0.1);
+}
+.ring-1 { width: 340px; height: 340px; animation: ring-pulse 6s ease-in-out infinite; }
+.ring-2 { width: 500px; height: 500px; animation: ring-pulse 6s ease-in-out 1.5s infinite; }
+.ring-3 { width: 680px; height: 680px; animation: ring-pulse 6s ease-in-out 3s infinite; border-color: rgba(200, 169, 110, 0.05); }
+
+@keyframes ring-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1);    }
+  50%       { opacity: 0.2; transform: scale(1.03); }
+}
+
+/* ── Card ─────────────────────────────────────────────────────────────────── */
+.card {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  text-align: center;
+  padding: 52px 36px 44px;
+
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-top-color: var(--c-border-hi);
+  border-radius: 28px;
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+
+  /* Subtle inner top highlight */
+  box-shadow:
+    0 0 0 0.5px rgba(255,255,255,0.05) inset,
+    0 1px 0   0   rgba(255,255,255,0.08) inset,
+    0 40px 80px -16px rgba(0,0,0,0.6),
+    0 0 60px -10px var(--c-accent-dim);
+}
+
+/* ── Entrance animation helper ────────────────────────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+.animate-in {
+  opacity: 0;
+  animation: fade-up 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: var(--delay, 0s);
+}
+
+/* ── Eyebrow ──────────────────────────────────────────────────────────────── */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 22px;
+  font-family: var(--f-sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--c-accent);
+  opacity: 0;
+}
+
+.eyebrow-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--c-accent);
+  box-shadow: 0 0 8px 2px var(--c-accent-glow);
+  animation: dot-breathe 3s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes dot-breathe {
+  0%, 100% { opacity: 1;   box-shadow: 0 0 8px 2px var(--c-accent-glow); }
+  50%       { opacity: 0.6; box-shadow: 0 0 4px 1px var(--c-accent-dim);  }
+}
+
+/* ── Headline ─────────────────────────────────────────────────────────────── */
+.headline {
+  font-family: var(--f-serif);
+  font-size: clamp(2.4rem, 8vw, 3.4rem);
+  font-weight: 400;
+  line-height: 1.08;
+  letter-spacing: -0.01em;
+  color: var(--c-text-primary);
+  margin-bottom: 20px;
+  opacity: 0;
+}
+
+.headline em {
+  font-style: italic;
+  color: var(--c-accent);
+}
+
+/* ── Instruction / sub-copy (ID used by main.js — .instruction) ─────────── */
+.instruction {
+  font-family: var(--f-sans);
+  font-size: 0.925rem;
+  font-weight: 300;
+  line-height: 1.65;
+  color: var(--c-text-second);
+  margin-bottom: 34px;
+  max-width: 320px;
+  opacity: 0;
+}
+
+.br-desktop { display: none; }
+
+/* ── Button wrapper ───────────────────────────────────────────────────────── */
+.btn-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  opacity: 0;
+}
+
+/* ── START AR button (ID + class used by main.js — #start-btn .primary-btn) */
+.primary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 280px;
+  padding: 17px 28px;
+
+  background: linear-gradient(135deg, #c8a96e 0%, #a88240 60%, #c8a96e 100%);
+  background-size: 200% 100%;
+  background-position: 0% 50%;
+
+  color: #0b0d0f;
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+
+  font-family: var(--f-sans);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+
+  box-shadow:
+    0 0 0 1px rgba(200, 169, 110, 0.3),
+    0 12px 36px -6px rgba(180, 140, 60, 0.45),
+    0 4px 12px  -2px rgba(0, 0, 0, 0.4);
+
+  transition:
+    background-position 0.5s ease,
+    box-shadow  0.25s ease,
+    transform   0.15s ease,
+    opacity     0.2s ease;
+
+  /* Disabled state baseline */
+  position: relative;
+  overflow: hidden;
+}
+
+/* Shimmer sweep on hover */
+.primary-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.18) 50%,
+    transparent 65%
+  );
+  transform: translateX(-100%);
+  transition: transform 0.55s ease;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.primary-btn:hover:not(:disabled)::before {
+  transform: translateX(100%);
+}
+
+.primary-btn:hover:not(:disabled) {
+  background-position: 100% 50%;
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 0 1px rgba(200, 169, 110, 0.45),
+    0 18px 48px -6px rgba(180, 140, 60, 0.55),
+    0 6px 16px  -2px rgba(0, 0, 0, 0.4);
+}
+
+.primary-btn:active:not(:disabled) {
+  transform: scale(0.97) translateY(0);
+  box-shadow:
+    0 0 0 1px rgba(200, 169, 110, 0.3),
+    0 6px 18px -4px rgba(180, 140, 60, 0.4),
+    0 2px 6px  -1px rgba(0, 0, 0, 0.35);
+  transition-duration: 0.08s;
+}
+
+.primary-btn:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+  background-position: 0% 50%;
+  box-shadow: 0 0 0 1px rgba(200, 169, 110, 0.15);
+}
+
+/* Button icon */
+.btn-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+/* Button label */
+.btn-label {
+  flex: 0 0 auto;
+}
+
+/* ── Device hint ──────────────────────────────────────────────────────────── */
+.device-hint {
+  font-family: var(--f-sans);
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--c-text-muted);
+  letter-spacing: 0.03em;
+}
+
+/* ── Technical badge ─────────────────────────────────────────────────────── */
+.tech-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 28px;
+  opacity: 0;
+
+  font-family: var(--f-sans);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--c-text-muted);
+}
+
+.badge-sep {
+  color: var(--c-accent);
+  opacity: 0.5;
+}
+
+/* ── Divider line between instruction and button ──────────────────────────── */
+.card::after {
+  content: '';
+  display: block;
+  width: 48px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--c-accent), transparent);
+  opacity: 0.3;
+  position: absolute;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* ── Mobile — primary target ─────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .card {
+    padding: 40px 28px 36px;
+    border-radius: 24px;
+    max-width: 100%;
+  }
+
+  .headline {
+    font-size: clamp(2.1rem, 9vw, 2.7rem);
+  }
+
+  .instruction {
+    font-size: 0.9rem;
+    margin-bottom: 28px;
+  }
+
+  .primary-btn {
+    max-width: 100%;
+    padding: 18px 24px;
+  }
+
+  .ring-1 { width: 260px; height: 260px; }
+  .ring-2 { width: 380px; height: 380px; }
+  .ring-3 { width: 520px; height: 520px; }
+}
+
+/* ── Desktop refinements ─────────────────────────────────────────────────── */
+@media (min-width: 768px) {
+  .br-desktop { display: inline; }
+
+  .card {
+    padding: 64px 52px 56px;
+  }
+
+  .headline {
+    font-size: 3.4rem;
+  }
+
+  .primary-btn {
+    max-width: 260px;
+  }
+}
+
+/* ── Landscape mobile ─────────────────────────────────────────────────────── */
+@media (max-height: 500px) and (orientation: landscape) {
+  .card {
+    padding: 28px 32px 24px;
+    gap: 0;
+  }
+
+  .eyebrow       { margin-bottom: 10px; }
+  .headline      { font-size: 1.8rem; margin-bottom: 10px; }
+  .instruction   { margin-bottom: 18px; font-size: 0.82rem; }
+  .tech-badge    { margin-top: 12px; }
+  .scan-rings    { display: none; }
+  .card::after   { display: none; }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .eyebrow,
+  .headline,
+  .instruction,
+  .btn-wrap,
+  .tech-badge {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+
+  .bg-glow,
+  .ring,
+  .eyebrow-dot {
+    animation: none !important;
+  }
+}
