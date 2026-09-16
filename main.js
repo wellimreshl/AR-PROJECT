@@ -53,10 +53,20 @@ function init() {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
+  // Tone mapping for physically correct PBR lighting
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+
   // Enable WebXR
   renderer.xr.enabled = true;
 
   container.appendChild(renderer.domElement);
+
+  // Set up Environment Map for PBR Reflections (Critical for metallic objects like cars)
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environment = envTex;
+  pmrem.dispose();
 
   // 4. Lighting Setup — used in both 2D preview and AR mode.
   // HemisphereLight gives warm sky + cool ground fill; important for PBR
@@ -197,6 +207,20 @@ function loadPorscheModel() {
             if (!model) {
               throw new Error('gltf.scene is missing after parse');
             }
+
+            // --- Material Diagnostics ---
+            let matCount = 0;
+            model.traverse((child) => {
+              if (child.isMesh) {
+                const materials = Array.isArray(child.material) ? child.material : [child.material];
+                materials.forEach(mat => {
+                  matCount++;
+                  console.info(`[Material] name: ${mat.name}, type: ${mat.type}, color: ${mat.color?.getHexString()}, roughness: ${mat.roughness}, metalness: ${mat.metalness}`);
+                });
+              }
+            });
+            console.info(`[AR Model] Total materials found: ${matCount}`);
+            // ----------------------------
 
             // ── Step 1: Measure the raw GLB bounding box (scale = 1.0) ──────────
             // We must do this BEFORE applying any scale, otherwise the bbox
@@ -413,11 +437,6 @@ async function startDesktopModelPreview() {
 function applyDesktopPreviewLighting() {
   scene.background = new THREE.Color(0xb8b8b8);
 
-  const pmrem = new THREE.PMREMGenerator(renderer);
-  const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environment = envTex;
-  pmrem.dispose();
-
   const hemi = new THREE.HemisphereLight(0xffffff, 0x8a8a8a, 0.85);
   scene.add(hemi);
 
@@ -436,9 +455,6 @@ function applyDesktopPreviewLighting() {
   const front = new THREE.DirectionalLight(0xffffff, 0.45);
   front.position.set(0, 3, 10);
   scene.add(front);
-
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
 }
 
 function handleARButtonClick() {
