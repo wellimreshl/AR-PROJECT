@@ -17,6 +17,10 @@ let hitTestSource = null;
 let hitTestSourceRequested = false;
 let controller;
 
+// The world reference space used for rendering & hit-test pose queries.
+// Resolved at session-start via getSupportedReferenceSpace().
+let worldReferenceSpace = null;
+
 let modelLoadPromise = null;
 
 function init() {
@@ -430,24 +434,63 @@ function startQuickLookSession() {
   a.click();
 }
 
+/**
+ * Tries to acquire a world reference space in order of AR suitability:
+ *   1. 'local'       — best for AR: device-relative, stable, widely supported
+ *   2. 'local-floor' — good for room-scale AR with floor tracking
+ *   3. 'viewer'      — last resort; poses are eye-relative but hit-test still works
+ *
+ * 'viewer' is intentionally NOT used as the world reference space if avoidable,
+ * because hit-test pose results queried against a viewer-origin space cause the
+ * reticle to drift with head movement rather than sticking to the real surface.
+ */
+async function getSupportedReferenceSpace(session) {
+  const spacesToTry = ['local', 'local-floor', 'viewer'];
+  for (const type of spacesToTry) {
+    try {
+      const space = await session.requestReferenceSpace(type);
+      console.info(`[WebXR] World reference space resolved: '${type}'`);
+      return { space, type };
+    } catch (e) {
+      console.warn(`[WebXR] Reference space '${type}' not supported:`, e.message);
+    }
+  }
+  // All attempts failed — throw with a descriptive message
+  throw new DOMException(
+    `No supported reference space found. Tried: ${spacesToTry.join(', ')}.`,
+    'NotSupportedError'
+  );
+}
+
 async function startWebXRSession() {
   const overlay = document.getElementById('ui-overlay');
 
   try {
-    // 'local' declares the base reference space ARCore requires on Android.
-    // Without it, requestSession() is rejected on many devices even if
-    // immersive-ar isSessionSupported() returned true.
-    // 'hit-test' enables surface detection for the placement reticle.
-    // Both must be in requiredFeatures — this call must stay inside the
-    // user-click handler to preserve the transient activation requirement.
+    // 'hit-test' is the only required feature — it enables surface detection.
+    // 'local' and 'local-floor' are listed as optional so the session is still
+    // granted even if the device only supports a subset of reference spaces.
+    // We resolve the best available world reference space at runtime below.
+    // This call MUST stay inside the user-click handler (transient activation).
     const session = await navigator.xr.requestSession('immersive-ar', {
-      requiredFeatures: ['local', 'hit-test'],
+      requiredFeatures: ['hit-test'],
+      optionalFeatures: ['local', 'local-floor'],
     });
 
     session.addEventListener('end', onSessionEnded);
 
     // Hand the session to Three.js — sets up the XR render loop internally
     await renderer.xr.setSession(session);
+
+    // Resolve the best available world reference space for rendering & hit-test pose queries.
+    // This is separate from the 'viewer' space used as the hit-test source origin.
+    const { space, type: spaceType } = await getSupportedReferenceSpace(session);
+    worldReferenceSpace = space;
+
+    // Override Three.js's internal reference space so poses are expressed
+    // in our chosen world space (important when 'local-floor' or 'viewer' wins).
+    renderer.xr.setReferenceSpace(worldReferenceSpace);
+
+    console.info(`[WebXR] Session started. World reference space: '${spaceType}'`);
 
     // UI changes for AR mode
     isStarted = true;
@@ -460,10 +503,7 @@ async function startWebXRSession() {
     object.visible = false;
 
   } catch (err) {
-    // --- Detailed diagnostic — surfaces the real rejection reason. ---
-    // The generic 'camera permissions' message previously hid SecurityError
-    // (Permissions-Policy) and NotSupportedError (missing 'local' feature)
-    // which are the two most common failures on Android Chrome + ARCore.
+    // --- Detailed diagnostic — surfaces the real rejection reason ---
 
     // Probe additional environment state for the diagnostic
     let arSupported = 'unknown';
@@ -497,8 +537,11 @@ async function startWebXRSession() {
         'Camera or AR permission was denied by the user or OS. ' +
         'Check site permissions in Chrome Settings and ensure camera access is allowed.',
       NotSupportedError:
-        "This device or browser does not support immersive-ar. " +
-        "Ensure ARCore is installed and updated (Android 7+ required).",
+        'The WebXR session started but none of the required reference space types ' +
+        '(local, local-floor, viewer) are supported by this device. ' +
+        'This is unusual — please ensure ARCore is installed and fully updated, ' +
+        'then reload the page. If the problem persists, your device may not support ' +
+        'WebXR hit-testing even though it reports immersive-ar as available.',
       InvalidStateError:
         'An AR session is already active, or the XR subsystem is in an invalid state. Try reloading the page.',
       AbortError:
@@ -520,6 +563,7 @@ function onSessionEnded() {
   isStarted = false;
   hitTestSourceRequested = false;
   hitTestSource = null;
+  worldReferenceSpace = null;
 
   // Restore 2D preview state
   const overlay = document.getElementById('ui-overlay');
@@ -551,9 +595,12 @@ function animate(timestamp, frame) {
   // If we have an active XR frame (in AR mode)
   if (frame) {
     const session = renderer.xr.getSession();
-    const referenceSpace = renderer.xr.getReferenceSpace();
 
     // 1. Request Hit Test Source on the first frame
+    //    The hit-test SOURCE uses 'viewer' (camera/eye origin) — this is the
+    //    standard approach: rays are cast from the viewer's perspective.
+    //    The hit-test RESULT pose is then queried against worldReferenceSpace
+    //    so the reticle is expressed in the stable world coordinate frame.
     if (hitTestSourceRequested === false) {
       session.requestReferenceSpace('viewer').then((viewerSpace) => {
         session.requestHitTestSource({ space: viewerSpace }).then((source) => {
@@ -561,7 +608,11 @@ function animate(timestamp, frame) {
           // Show the reticle immediately once hit-test is ready,
           // even before any surface is found, so user sees feedback right away.
           reticle.visible = true;
+        }).catch((e) => {
+          console.warn('[WebXR] requestHitTestSource failed:', e);
         });
+      }).catch((e) => {
+        console.warn('[WebXR] requestReferenceSpace(viewer) for hit-test failed:', e);
       });
 
       session.addEventListener('end', () => {
@@ -572,16 +623,21 @@ function animate(timestamp, frame) {
       hitTestSourceRequested = true;
     }
 
-    // 2. Perform Hit Test — snap to real surface when found, else keep last position
-    if (hitTestSource) {
+    // 2. Perform Hit Test — snap reticle to real-world surface.
+    //    Pose is expressed in worldReferenceSpace (the stable world frame),
+    //    NOT the viewer space, so the reticle stays fixed on the surface
+    //    rather than following the camera.
+    if (hitTestSource && worldReferenceSpace) {
       const hitTestResults = frame.getHitTestResults(hitTestSource);
 
       if (hitTestResults.length > 0) {
         const hit = hitTestResults[0];
-        const pose = hit.getPose(referenceSpace);
-        // Snap to the detected surface
-        reticle.matrix.fromArray(pose.transform.matrix);
-        reticle.visible = true;
+        const pose = hit.getPose(worldReferenceSpace);
+        if (pose) {
+          // Snap to the detected surface
+          reticle.matrix.fromArray(pose.transform.matrix);
+          reticle.visible = true;
+        }
       }
       // When no surface hit, leave reticle where it last was (rather than hiding it)
       // so the user always sees the ring and knows where to tap.
