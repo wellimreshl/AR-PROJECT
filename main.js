@@ -5,8 +5,15 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const MODEL_URL = '/assets/porsche_911_ar.glb';
 const DRACO_DECODER_PATH = '/draco/gltf/';
-// Initial AR placement scale: ~5% of real-world size (~22 cm long) — good table-top AR size.
-const MODEL_SCALE = 0.05;
+
+// Target longest-axis length for the Porsche in AR world-space (metres).
+// 1.0 m gives a clearly visible, desk/floor-scale AR impression.
+// Adjust this constant to change the initial AR size without touching any
+// other part of the code — the scale is derived dynamically from the GLB bbox.
+const TARGET_AR_LENGTH = 1.0;
+
+// Resolved after the GLB loads; used in AR and restored on session end.
+let arModelScale = 1.0;
 
 let scene, camera, renderer;
 let object, reticle;
@@ -51,13 +58,23 @@ function init() {
 
   container.appendChild(renderer.domElement);
 
-  // 4. Lighting Setup
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+  // 4. Lighting Setup — used in both 2D preview and AR mode.
+  // HemisphereLight gives warm sky + cool ground fill; important for PBR
+  // materials to avoid the "all black" look when there is no env-map.
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444466, 0.9);
+  scene.add(hemiLight);
+
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
 
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
-  directionalLight.position.set(10, 20, 10);
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1.4);
+  directionalLight.position.set(5, 10, 7);
   scene.add(directionalLight);
+
+  // Secondary fill light from opposite side to reduce harsh shadows in AR.
+  const fillLight = new THREE.DirectionalLight(0xc8d8ff, 0.6);
+  fillLight.position.set(-8, 4, -5);
+  scene.add(fillLight);
 
   // 5. Placement root (Porsche is loaded asynchronously into this group)
   object = new THREE.Group();
@@ -181,37 +198,65 @@ function loadPorscheModel() {
               throw new Error('gltf.scene is missing after parse');
             }
 
-            model.scale.setScalar(MODEL_SCALE);
+            // ── Step 1: Measure the raw GLB bounding box (scale = 1.0) ──────────
+            // We must do this BEFORE applying any scale, otherwise the bbox
+            // reflects the scaled dimensions and the scale calculation is circular.
+            model.scale.set(1, 1, 1);
+            const rawBox = new THREE.Box3().setFromObject(model);
+            const rawSize = new THREE.Vector3();
+            rawBox.getSize(rawSize);
 
-            // Ground-align: bottom of bbox on y=0, centered on XZ
-            const box = new THREE.Box3().setFromObject(model);
-            const size = new THREE.Vector3();
-            const center = new THREE.Vector3();
-            box.getSize(size);
-            box.getCenter(center);
+            // The longest axis determines the scale so the car fits TARGET_AR_LENGTH
+            // regardless of whether the GLB was exported in metres, centimetres, etc.
+            const longestRawAxis = Math.max(rawSize.x, rawSize.y, rawSize.z);
+            if (longestRawAxis <= 0) throw new Error('GLB bounding box is degenerate (size = 0).');
+
+            arModelScale = TARGET_AR_LENGTH / longestRawAxis;
 
             console.info(
-              '[AR Model] Loaded',
-              absoluteUrl,
-              `size≈ ${size.x.toFixed(2)}m × ${size.y.toFixed(2)}m × ${size.z.toFixed(2)}m`,
-              `scale=${MODEL_SCALE}`
+              '[AR Model] Loaded:', absoluteUrl,
+              `\n  raw GLB bbox : ${rawSize.x.toFixed(3)} × ${rawSize.y.toFixed(3)} × ${rawSize.z.toFixed(3)} units`,
+              `\n  longest axis : ${longestRawAxis.toFixed(3)} units`,
+              `\n  TARGET_AR_LENGTH : ${TARGET_AR_LENGTH} m`,
+              `\n  computed scale   : ${arModelScale.toFixed(6)}`,
             );
 
-            model.position.x = -center.x;
-            model.position.y = -box.min.y;
-            model.position.z = -center.z;
+            // ── Step 2: Apply computed scale ─────────────────────────────────────
+            model.scale.setScalar(arModelScale);
+
+            // ── Step 3: Measure post-scale bbox for ground-alignment ─────────────
+            // (rawBox × scale gives the same result but measuring again is safer
+            // in case the model has non-uniform internal transforms.)
+            const scaledBox = new THREE.Box3().setFromObject(model);
+            const scaledSize = new THREE.Vector3();
+            const scaledCenter = new THREE.Vector3();
+            scaledBox.getSize(scaledSize);
+            scaledBox.getCenter(scaledCenter);
+
+            console.info(
+              '[AR Model] Post-scale bbox:',
+              `${scaledSize.x.toFixed(3)} × ${scaledSize.y.toFixed(3)} × ${scaledSize.z.toFixed(3)} m`,
+              `| min.y=${scaledBox.min.y.toFixed(3)} max.y=${scaledBox.max.y.toFixed(3)}`,
+            );
+
+            // ── Step 4: Ground-align — shift model so bbox bottom sits at y=0 ───
+            // model.position.y = -scaledBox.min.y lifts the model so its lowest
+            // point coincides with the parent group's XZ plane (the hit surface).
+            model.position.x = -scaledCenter.x;
+            model.position.y = -scaledBox.min.y;   // ← wheels touch the surface
+            model.position.z = -scaledCenter.z;
 
             while (object.children.length > 0) {
               object.remove(object.children[0]);
             }
             object.add(model);
 
-            // Frame 2D preview camera around the scaled car
-            const radius = Math.max(size.x, size.y, size.z) * 0.75;
-            camera.position.set(radius * 0.9, size.y * 0.55, radius * 1.35);
+            // ── Step 5: Frame 2D preview camera around the scaled car ────────────
+            const radius = Math.max(scaledSize.x, scaledSize.y, scaledSize.z) * 0.75;
+            camera.position.set(radius * 0.9, scaledSize.y * 0.55, radius * 1.35);
             camera.near = 0.01;
             camera.far = Math.max(100, radius * 8);
-            camera.lookAt(0, size.y * 0.35, 0);
+            camera.lookAt(0, scaledSize.y * 0.35, 0);
             camera.updateProjectionMatrix();
 
             object.position.set(0, 0, 0);
